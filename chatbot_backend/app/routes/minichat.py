@@ -22,12 +22,18 @@ def chat() -> tuple[Any, int] | Any:
     Environment:
     - AI_PROVIDER: defaults to "gemini"; currently only "gemini" is supported
     - GEMINI_API_KEY: Google Generative AI API key
+    - GEMINI_MODEL: Optional model override (default 'gemini-1.5-flash')
 
     Responses:
     - 200: {"reply": "<assistant reply string>"}
     - 400: {"error": "<message>"} on invalid/missing payload or unsupported provider
-    - 502: {"error": "<message>"} on provider/configuration error (e.g., missing/invalid API key)
+    - 502: {"error": "<message>"} on provider/configuration error (e.g., missing/invalid API key or invalid model)
     - 500: {"error": "Internal server error"} on unexpected error
+
+    Example curl:
+        curl -s -X POST http://localhost:3001/api/chat \\
+            -H "Content-Type: application/json" \\
+            -d '{"message":"Hello! Who are you?"}'
     """
     # Validate JSON body
     if not request.is_json:
