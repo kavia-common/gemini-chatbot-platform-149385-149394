@@ -77,7 +77,11 @@ def chat() -> tuple[Any, int] | Any:
     except GeminiProviderError as exc:
         # Provider returned an error (auth, quota, model not found, content blocked, etc.) -> 502
         current_app.logger.error("Gemini provider error: %s", exc)
-        return jsonify({"error": f"Gemini provider error: {exc}"}), HTTPStatus.BAD_GATEWAY
+        return jsonify({
+            "error": f"Gemini provider error: {exc}",
+            "hint": "Ensure GEMINI_MODEL is supported by the installed SDK. "
+                    "Try one of: gemini-1.5-flash, gemini-1.5-flash-8b, gemini-1.5-pro."
+        }), HTTPStatus.BAD_GATEWAY
 
     except Exception as exc:
         # Unexpected error; log with traceback but return generic message to client

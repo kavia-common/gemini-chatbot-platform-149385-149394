@@ -20,6 +20,6 @@ Expected 200 response:
 
 Environment variables of interest:
 - GEMINI_API_KEY (required)
-- GEMINI_MODEL (optional; default gemini-1.5-flash; alternatives: gemini-1.5-flash-8b, gemini-1.5-pro)
+- GEMINI_MODEL (optional) If unset, defaults to gemini-1.5-flash. If set to an unsupported model (e.g., a newer version not available in the current SDK), the backend will attempt to use it and gracefully fall back to a supported model to avoid 502s. Supported shortlist: gemini-1.5-flash, gemini-1.5-flash-8b, gemini-1.5-pro.
 - CORS_ALLOWED_ORIGINS (optional; default *)
 - DATABASE_URL (optional; falls back to local SQLite)
