@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Iterable
 
 import google.generativeai as genai
 
@@ -71,6 +71,54 @@ class GeminiService:
     - Uses the official google-generativeai SDK (no direct v1beta REST calls).
     """
 
+    # PUBLIC_INTERFACE
+    @staticmethod
+    def list_available_models(api_key: Optional[str] = None) -> List[str]:
+        """Return a list of available model names visible to this API key.
+
+        This uses google-generativeai SDK's list_models. It gracefully handles cases
+        where the SDK is older or the call fails, returning an empty list.
+
+        Args:
+            api_key: Optional API key override. If not provided, reads GEMINI_API_KEY.
+
+        Returns:
+            List of model name strings (e.g., 'models/gemini-2.5-flash') or just names
+            depending on SDK version. We'll normalize to bare names when possible.
+        """
+        key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
+        if not key:
+            return []
+        try:
+            genai.configure(api_key=key)
+            models: Iterable = genai.list_models()
+            names: List[str] = []
+            for m in models:
+                # Some SDK versions use m.name like 'models/gemini-2.5-flash'
+                raw = getattr(m, "name", None) or str(m)
+                # Normalize to bare model id if it starts with 'models/'
+                names.append(raw.split("/", 1)[1] if raw.startswith("models/") else raw)
+            return sorted(set(names))
+        except Exception:
+            # On any failure, return empty.
+            return []
+
+    @staticmethod
+    def filter_chat_capable(models: List[str]) -> List[str]:
+        """Filter a list of model names for likely chat-capable Gemini models.
+
+        Heuristics:
+        - Include 'gemini' in name
+        - Exclude vision-only or image-specific ones (coarse: keep '-flash', '-pro', '2.5', '1.5')
+        """
+        allowed_keywords = ("gemini", "flash", "pro", "1.5", "2.5")
+        out: List[str] = []
+        for name in models:
+            n = (name or "").lower()
+            if "gemini" in n and any(k in n for k in allowed_keywords):
+                out.append(name)
+        return sorted(set(out))
+
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         # Resolve credentials
         self.api_key = (api_key or os.getenv("GEMINI_API_KEY") or "").strip()
@@ -99,8 +147,11 @@ class GeminiService:
             self.model = genai.GenerativeModel(self.model_name)
             logger.info("Initialized GeminiService using model '%s'", self.model_name)
         except Exception as primary_exc:
+            # Suggest available models for this key, if we can list them
+            available = self.filter_chat_capable(self.list_available_models(self.api_key))
+            suggestion = f" Available models: {', '.join(available)}" if available else ""
             raise GeminiProviderError(
-                f"Failed to initialize Gemini model '{self.model_name}': {primary_exc}"
+                f"Failed to initialize Gemini model '{self.model_name}': {primary_exc}.{suggestion}"
             ) from primary_exc
 
     # PUBLIC_INTERFACE
@@ -133,8 +184,10 @@ class GeminiService:
                     "Check GEMINI_API_KEY."
                 ) from exc
             if "not found" in lower or ("model" in lower and "not" in lower and "found" in lower):
+                available = self.filter_chat_capable(self.list_available_models(self.api_key))
+                suggestion = f" Available models: {', '.join(available)}" if available else ""
                 raise GeminiProviderError(
-                    f"Model '{self.model_name}' not found or unavailable in the current SDK/account."
+                    f"Model '{self.model_name}' not found or unavailable in the current SDK/account.{suggestion}"
                 ) from exc
             raise GeminiProviderError(
                 f"Failed to call Gemini API with model '{self.model_name}': {exc}"

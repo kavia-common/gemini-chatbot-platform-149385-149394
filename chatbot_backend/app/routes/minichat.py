@@ -82,8 +82,8 @@ def chat() -> tuple[Any, int] | Any:
         model_used = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
         return jsonify({
             "error": f"Gemini provider error while using model '{model_used}': {exc}",
-            "hint": "Ensure GEMINI_MODEL is supported by the installed SDK. "
-                    "Example: gemini-2.5-flash."
+            "hint": "Ensure GEMINI_MODEL is supported by your API key and SDK. "
+                    "Visit GET /api/models to see available chat-capable models and set GEMINI_MODEL accordingly."
         }), HTTPStatus.BAD_GATEWAY
 
     except Exception as exc:
