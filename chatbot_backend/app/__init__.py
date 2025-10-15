@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from .extensions import init_extensions, db
 from .routes.health import blp as health_blp
 from .routes.chat import blp as chat_blp
+from .routes.minichat import minichat_bp
 
 
 # Initialize environment variables from .env (if present)
@@ -71,6 +72,9 @@ def create_app() -> Flask:
     api = Api(app)
     api.register_blueprint(health_blp)
     api.register_blueprint(chat_blp)
+
+    # Register minimal chat endpoint (no DB usage, lightweight CORS already configured)
+    app.register_blueprint(minichat_bp)
 
     # Create DB tables (for simple setup; in prod, use migrations)
     with app.app_context():
