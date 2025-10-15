@@ -4,7 +4,7 @@ import os
 from http import HTTPStatus
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 
 # Use a plain Flask Blueprint for a minimal endpoint (no OpenAPI required)
 minichat_bp = Blueprint("MiniChat", __name__, url_prefix="/api")
@@ -25,8 +25,9 @@ def chat() -> tuple[Any, int] | Any:
 
     Responses:
     - 200: {"reply": "<assistant reply string>"}
-    - 400: {"error": "<message>"} on invalid/missing payload
-    - 500: {"error": "<message>"} on provider or internal error
+    - 400: {"error": "<message>"} on invalid/missing payload or unsupported provider
+    - 502: {"error": "<message>"} on provider/configuration error (e.g., missing/invalid API key)
+    - 500: {"error": "Internal server error"} on unexpected error
     """
     # Validate JSON body
     if not request.is_json:
@@ -42,20 +43,37 @@ def chat() -> tuple[Any, int] | Any:
     provider = os.getenv("AI_PROVIDER", "gemini").strip().lower()
     if provider != "gemini":
         # For this minimal endpoint, only Gemini is supported.
+        current_app.logger.warning("Unsupported AI_PROVIDER value received: %s", provider)
         return (
             jsonify({"error": f"AI_PROVIDER '{provider}' is not supported by this endpoint"}),
-            HTTPStatus.INTERNAL_SERVER_ERROR,
+            HTTPStatus.BAD_REQUEST,
         )
 
     # Call Gemini via the existing service wrapper
     try:
-        from ..services.gemini_service import GeminiService
+        from ..services.gemini_service import (
+            GeminiService,
+            GeminiConfigurationError,
+            GeminiProviderError,
+        )
 
         gemini = GeminiService()
         reply_text = gemini.generate_reply(message)
         # Ensure a string response even if service returns None/empty
         reply_text = reply_text if isinstance(reply_text, str) else ""
         return jsonify({"reply": reply_text}), HTTPStatus.OK
-    except Exception:
-        # Do not leak internal details to the client
-        return jsonify({"error": "Provider error"}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+    except GeminiConfigurationError as exc:
+        # Configuration issues (e.g., missing GEMINI_API_KEY) -> 502
+        current_app.logger.error("Gemini configuration error: %s", exc)
+        return jsonify({"error": str(exc)}), HTTPStatus.BAD_GATEWAY
+
+    except GeminiProviderError as exc:
+        # Provider returned an error (auth, quota, model not found, content blocked, etc.) -> 502
+        current_app.logger.error("Gemini provider error: %s", exc)
+        return jsonify({"error": f"Gemini provider error: {exc}"}), HTTPStatus.BAD_GATEWAY
+
+    except Exception as exc:
+        # Unexpected error; log with traceback but return generic message to client
+        current_app.logger.exception("Unexpected error invoking Gemini: %s", exc)
+        return jsonify({"error": "Internal server error"}), HTTPStatus.INTERNAL_SERVER_ERROR
