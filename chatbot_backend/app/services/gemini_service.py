@@ -20,13 +20,17 @@ logger = logging.getLogger(__name__)
 # A conservative, known-good shortlist of text-capable models for this project.
 # This should align with versions commonly available in the google-generativeai SDK used.
 _SUPPORTED_MODELS: List[str] = [
+    # Explicitly support latest flash model
+    "gemini-2.5-flash",
+    # Older models still allowed if explicitly set
     "gemini-1.5-flash",
     "gemini-1.5-flash-8b",
     "gemini-1.5-pro",
 ]
 
-# Default fallback model if provided model is unsupported/unavailable.
-_DEFAULT_FALLBACK_MODEL = "gemini-1.5-flash"
+# Default model if GEMINI_MODEL is not provided.
+# IMPORTANT: We no longer hardcode a fallback that overrides explicit env/model selection.
+_DEFAULT_DEFAULT_MODEL = "gemini-2.5-flash"
 
 
 def _normalize_model_name(name: str) -> str:
@@ -36,34 +40,26 @@ def _normalize_model_name(name: str) -> str:
 
 def _select_model(env_model: str | None, override: str | None) -> Tuple[str, Optional[str]]:
     """
-    Determine the model to use based on override and environment with validation.
+    Determine the model to use based on override and environment.
 
     Priority:
     1) Explicit override passed to the service
     2) GEMINI_MODEL environment variable
-    3) Default fallback
+    3) Default to gemini-2.5-flash
 
     Returns:
         (chosen_model, warning_message_if_any)
     """
-    # Strictly respect the provided override if present; otherwise use env; else fallback
     candidate = _normalize_model_name(override) or _normalize_model_name(env_model)
-    warning: Optional[str] = None
-
     if candidate:
-        # If candidate is supported from our shortlist, use it directly.
-        if candidate in _SUPPORTED_MODELS:
-            return candidate, None
-        # If candidate not in shortlist, attempt to initialize later and gracefully fallback
-        # but record a warning for logs.
-        warning = (
-            f"GEMINI_MODEL '{candidate}' is not in supported shortlist. "
-            f"Will attempt to initialize; if it fails, falling back to '{_DEFAULT_FALLBACK_MODEL}'."
-        )
-        return candidate, warning
-
-    # No candidate provided -> use default
-    return _DEFAULT_FALLBACK_MODEL, None
+        # Honor provided model verbatim; log a gentle warning if not in our shortlist.
+        if candidate not in _SUPPORTED_MODELS:
+            return candidate, (
+                f"GEMINI_MODEL '{candidate}' is not in the local shortlist but will be used as-is."
+            )
+        return candidate, None
+    # Default only when nothing provided
+    return _DEFAULT_DEFAULT_MODEL, None
 
 
 class GeminiService:
@@ -98,40 +94,14 @@ class GeminiService:
         if warn:
             logger.warning(warn)
 
-        # Try to initialize the chosen model; if it fails and is not the default fallback, try fallback.
+        # Try to initialize the chosen model; if it fails, surface error including model name attempted.
         try:
             self.model = genai.GenerativeModel(self.model_name)
             logger.info("Initialized GeminiService using model '%s'", self.model_name)
         except Exception as primary_exc:
-            # If user requested a model that fails to init, gracefully fallback once.
-            if self.model_name != _DEFAULT_FALLBACK_MODEL:
-                logger.warning(
-                    "Failed to initialize requested model '%s': %s. Falling back to '%s'.",
-                    self.model_name,
-                    primary_exc,
-                    _DEFAULT_FALLBACK_MODEL,
-                )
-                try:
-                    self.model_name = _DEFAULT_FALLBACK_MODEL
-                    self.model = genai.GenerativeModel(self.model_name)
-                    logger.info("Fallback initialization successful with model '%s'", self.model_name)
-                except Exception as fallback_exc:
-                    # Provide a clear, actionable error including valid models
-                    raise GeminiProviderError(
-                        "Failed to initialize Gemini model(s). "
-                        f"Requested: '{self.requested_model_name or 'N/A'}' | "
-                        f"Tried: '{chosen}', then fallback '{_DEFAULT_FALLBACK_MODEL}'. "
-                        f"Error: {fallback_exc}. "
-                        "Set GEMINI_MODEL to one of: "
-                        + ", ".join(_SUPPORTED_MODELS)
-                    ) from fallback_exc
-            else:
-                # Even default failed: surface a detailed error
-                raise GeminiProviderError(
-                    f"Failed to initialize default Gemini model '{self.model_name}': {primary_exc}. "
-                    "Consider checking your SDK version or setting GEMINI_MODEL to one of: "
-                    + ", ".join(_SUPPORTED_MODELS)
-                ) from primary_exc
+            raise GeminiProviderError(
+                f"Failed to initialize Gemini model '{self.model_name}': {primary_exc}"
+            ) from primary_exc
 
     # PUBLIC_INTERFACE
     def generate_reply(self, prompt: str) -> str:
@@ -164,9 +134,7 @@ class GeminiService:
                 ) from exc
             if "not found" in lower or ("model" in lower and "not" in lower and "found" in lower):
                 raise GeminiProviderError(
-                    f"Model '{self.model_name}' not found or not available in the current SDK/account. "
-                    "Set GEMINI_MODEL to a supported model such as: "
-                    + ", ".join(_SUPPORTED_MODELS)
+                    f"Model '{self.model_name}' not found or unavailable in the current SDK/account."
                 ) from exc
             raise GeminiProviderError(
                 f"Failed to call Gemini API with model '{self.model_name}': {exc}"

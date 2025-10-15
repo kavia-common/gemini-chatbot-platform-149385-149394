@@ -22,7 +22,7 @@ def chat() -> tuple[Any, int] | Any:
     Environment:
     - AI_PROVIDER: defaults to "gemini"; currently only "gemini" is supported
     - GEMINI_API_KEY: Google Generative AI API key
-    - GEMINI_MODEL: Optional model override (default 'gemini-1.5-flash')
+    - GEMINI_MODEL: Optional model override (default 'gemini-2.5-flash')
 
     Responses:
     - 200: {"reply": "<assistant reply string>"}
@@ -77,10 +77,13 @@ def chat() -> tuple[Any, int] | Any:
     except GeminiProviderError as exc:
         # Provider returned an error (auth, quota, model not found, content blocked, etc.) -> 502
         current_app.logger.error("Gemini provider error: %s", exc)
+        # Include the actual model attempted if available
+        from ..services.gemini_service import GeminiService  # type: ignore
+        model_used = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
         return jsonify({
-            "error": f"Gemini provider error: {exc}",
+            "error": f"Gemini provider error while using model '{model_used}': {exc}",
             "hint": "Ensure GEMINI_MODEL is supported by the installed SDK. "
-                    "Try one of: gemini-1.5-flash, gemini-1.5-flash-8b, gemini-1.5-pro."
+                    "Example: gemini-2.5-flash."
         }), HTTPStatus.BAD_GATEWAY
 
     except Exception as exc:
