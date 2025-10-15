@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from flask import Flask
 from flask_cors import CORS
 from flask_smorest import Api
@@ -17,17 +18,43 @@ from .routes.models import blp as models_blp
 load_dotenv()
 
 
+def _split_csv(value: str) -> list[str]:
+    return [o.strip() for o in value.split(",") if o.strip()]
+
+
 def _get_cors_origins() -> list[str] | str:
-    """Compute CORS allowed origins from env var CORS_ALLOWED_ORIGINS.
+    """Compute CORS allowed origins with support for FRONTEND_ORIGIN.
+
+    Priority:
+    - FRONTEND_ORIGIN: single origin or comma-separated list
+    - CORS_ALLOWED_ORIGINS: fallback compatibility (single or comma-separated)
+    - Defaults: localhost:3000 and VSCode preview domain at port 3000
 
     Returns:
-        A list of origins if provided as comma-separated values,
-        or '*' if not set.
+        A list of allowed origins or '*' for allow-all.
     """
-    origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
-    if origins.strip() == "*":
-        return "*"
-    return [o.strip() for o in origins.split(",") if o.strip()]
+    # New explicit env for frontend origin(s)
+    fe_origin = os.getenv("FRONTEND_ORIGIN", "").strip()
+    if fe_origin:
+        # comma-separated support
+        origins = _split_csv(fe_origin)
+        return origins if origins else fe_origin
+
+    # Backward compatible env
+    legacy = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+    if legacy:
+        if legacy == "*":
+            return "*"
+        return _split_csv(legacy)
+
+    # Sensible defaults for local and workspace preview
+    defaults = [
+        "http://localhost:3000",
+        "https://localhost:3000",
+        # VSCode preview domains used in this workspace; allow subdomain wildcard via regex when applied below
+        # Note: flask-cors accepts strings or regex patterns. We'll pass as strings and patterns in config.
+    ]
+    return defaults
 
 
 # PUBLIC_INTERFACE
@@ -37,7 +64,9 @@ def create_app() -> Flask:
     Configuration:
     - DATABASE_URL: SQLAlchemy database URL (required for Postgres).
       Falls back to local SQLite when not provided.
-    - CORS_ALLOWED_ORIGINS: Comma-separated origins for CORS (default '*').
+    - FRONTEND_ORIGIN: Allowed origin(s) for CORS (comma-separated supported).
+      Example: http://localhost:3000,https://vscode-internal-*.cloud.kavia.ai:3000
+    - CORS_ALLOWED_ORIGINS: Legacy fallback; if set to '*', allows all.
 
     Returns:
         The configured Flask app instance.
@@ -65,9 +94,31 @@ def create_app() -> Flask:
     # Initialize extensions
     init_extensions(app)
 
-    # CORS
+    # CORS: Restrict to API routes and allow required methods/headers
     cors_origins = _get_cors_origins()
-    CORS(app, resources={r"/*": {"origins": cors_origins}})
+
+    # Build resources config for /api/* only
+    resources = {
+        r"/api/*": {
+            "origins": cors_origins
+            if cors_origins != "*"
+            else "*",
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": False,
+            "max_age": 600,
+        }
+    }
+
+    # If defaults were used, also accept VSCode preview domains via regex
+    if isinstance(cors_origins, list) and any("localhost:3000" in o for o in cors_origins):
+        # Add regex for preview domain on port 3000
+        resources[r"/api/*"]["origins"] = list(cors_origins) + [
+            re.compile(r"^https://vscode-internal-[\w-]+\.cloud\.kavia\.ai:3000$")
+        ]
+
+    CORS(app, resources=resources)
 
     # API / Blueprints
     api = Api(app)

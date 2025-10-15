@@ -11,7 +11,7 @@ minichat_bp = Blueprint("MiniChat", __name__, url_prefix="/api")
 
 
 # PUBLIC_INTERFACE
-@minichat_bp.route("/chat", methods=["POST"])
+@minichat_bp.route("/chat", methods=["POST", "OPTIONS"])
 def chat() -> tuple[Any, int] | Any:
     """Minimal chat endpoint that generates a reply using the Gemini API.
 
