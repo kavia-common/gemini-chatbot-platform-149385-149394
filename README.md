@@ -8,7 +8,13 @@
 
 2) Run the Flask backend (port may vary depending on environment):
    python -m pip install -r chatbot_backend/requirements.txt
-   python -m flask --app chatbot_backend/run.py run --port 3001
+   # Recommended:
+   python chatbot_backend/run.py
+   # Or:
+   python -m flask --app chatbot_backend/run.py run --host 0.0.0.0 --port 3001
+
+Health check:
+   curl -s http://localhost:3001/healthz
 
 3) Test minimal chat endpoint:
    curl -s -X POST http://localhost:3001/api/chat \

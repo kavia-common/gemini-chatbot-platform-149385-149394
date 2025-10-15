@@ -9,7 +9,10 @@ Quick start:
 
 2) Install and run:
    python -m pip install -r requirements.txt
-   python -m flask --app run.py run --port 3001
+   # Recommended direct run binds to 0.0.0.0:3001
+   python run.py
+   # Or with Flask CLI:
+   python -m flask --app run.py run --host 0.0.0.0 --port 3001
 
 Minimal chat test:
    curl -s -X POST http://localhost:3001/api/chat \
